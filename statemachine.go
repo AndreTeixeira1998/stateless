@@ -53,9 +53,9 @@ type UnhandledTriggerActionFunc[S State, T Trigger] func(ctx context.Context, st
 // DefaultUnhandledTriggerAction is the default unhandled trigger action.
 func DefaultUnhandledTriggerAction[S State, T Trigger](_ context.Context, state S, trigger T, unmetGuards []string) error {
 	if len(unmetGuards) != 0 {
-		return fmt.Errorf("stateless: Trigger '%s' is valid for transition from state '%s' but a guard conditions are not met. Guard descriptions: '%v", trigger, state, unmetGuards)
+		return fmt.Errorf("stateless: Trigger '%v' is valid for transition from state '%v' but a guard conditions are not met. Guard descriptions: '%v", trigger, state, unmetGuards)
 	}
-	return fmt.Errorf("stateless: No valid leaving transitions are permitted from state '%s' for trigger '%s', consider ignoring the trigger", state, trigger)
+	return fmt.Errorf("stateless: No valid leaving transitions are permitted from state '%v' for trigger '%v', consider ignoring the trigger", state, trigger)
 }
 
 // A StateMachine is an abstract machine that can be in exactly one of a finite number of states at any given time.
@@ -240,6 +240,9 @@ func (sm *StateMachine[S, T]) Fire(trigger T, args ...interface{}) error {
 //
 // There is no rollback mechanism in case there is an action error after the state has been changed.
 // Guard clauses or error states can be used gracefully handle this situations.
+//
+// The context is passed down to all actions and callbacks called within the scope of this method.
+// There is no context error checking, although it may be implemented in future releases.
 func (sm *StateMachine[S, T]) FireCtx(ctx context.Context, trigger T, args ...interface{}) error {
 	return sm.internalFire(ctx, trigger, args...)
 }
@@ -370,7 +373,7 @@ func (sm *StateMachine[S, T]) internalFireOne(ctx context.Context, trigger T, ar
 	case *dynamicTriggerBehaviour[S, T]:
 		destination, ok := t.ResultsInTransitionFrom(ctx, source, args...)
 		if !ok {
-			err = fmt.Errorf("stateless: Dynamic handler for trigger %s in state %s has failed", trigger, source)
+			err = fmt.Errorf("stateless: Dynamic handler for trigger %v in state %v has failed", trigger, source)
 		} else {
 			transition := Transition[S, T]{Source: source, Destination: destination, Trigger: trigger}
 			err = sm.handleTransitioningTrigger(ctx, representativeState, transition, args...)
@@ -453,7 +456,7 @@ func (sm *StateMachine[S, T]) enterState(ctx context.Context, sr *stateRepresent
 			}
 		}
 		if !isValidForInitialState {
-			panic(fmt.Sprintf("stateless: The target (%s) for the initial transition is not a substate.", sr.InitialTransitionTarget))
+			panic(fmt.Sprintf("stateless: The target (%v) for the initial transition is not a substate.", sr.InitialTransitionTarget))
 		}
 		initialTranslation := Transition[S, T]{Source: transition.Source, Destination: sr.InitialTransitionTarget, Trigger: transition.Trigger, isInitial: true}
 		sr = sm.stateRepresentation(sr.InitialTransitionTarget)
