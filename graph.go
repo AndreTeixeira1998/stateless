@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-type graph struct {
+type graph[S State, T Trigger] struct {
 }
 
-func (g *graph) FormatStateMachine(sm *StateMachine) string {
+func (g *graph[S, T]) FormatStateMachine(sm *StateMachine[S, T]) string {
 	var sb strings.Builder
 	sb.WriteString("digraph {\n\tcompound=true;\n\tnode [shape=Mrecord];\n\trankdir=\"LR\";\n\n")
 	for _, sr := range sm.stateConfig {
@@ -31,7 +31,7 @@ func (g *graph) FormatStateMachine(sm *StateMachine) string {
 	return sb.String()
 }
 
-func (g *graph) formatActions(sr *stateRepresentation) string {
+func (g *graph[S, T]) formatActions(sr *stateRepresentation[S, T]) string {
 	es := make([]string, 0, len(sr.EntryActions)+len(sr.ExitActions)+len(sr.ActivateActions)+len(sr.DeactivateActions))
 	for _, act := range sr.ActivateActions {
 		es = append(es, fmt.Sprintf("activated / %s", act.Description.String()))
@@ -50,7 +50,7 @@ func (g *graph) formatActions(sr *stateRepresentation) string {
 	return strings.Join(es, `\n`)
 }
 
-func (g *graph) formatOneState(sr *stateRepresentation) string {
+func (g *graph[S, T]) formatOneState(sr *stateRepresentation[S, T]) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("\t%s [label=\"%s", sr.State, sr.State))
 	act := g.formatActions(sr)
@@ -62,7 +62,7 @@ func (g *graph) formatOneState(sr *stateRepresentation) string {
 	return sb.String()
 }
 
-func (g *graph) formatOneCluster(sr *stateRepresentation) string {
+func (g *graph[S, T]) formatOneCluster(sr *stateRepresentation[S, T]) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("\nsubgraph cluster_%s {\n\tlabel=\"%s", sr.State, sr.State))
 	act := g.formatActions(sr)
@@ -79,36 +79,36 @@ func (g *graph) formatOneCluster(sr *stateRepresentation) string {
 	return sb.String()
 }
 
-func (g *graph) getEntryActions(ab []actionBehaviour, t Trigger) []string {
+func (g *graph[S, T]) getEntryActions(ab []actionBehaviour[S, T], t T) []string {
 	var actions []string
 	for _, ea := range ab {
-		if ea.Trigger == t {
+		if ea.Trigger == nil || *ea.Trigger == t {
 			actions = append(actions, ea.Description.String())
 		}
 	}
 	return actions
 }
 
-func (g *graph) formatAllStateTransitions(sm *StateMachine, sr *stateRepresentation) string {
+func (g *graph[S, T]) formatAllStateTransitions(sm *StateMachine[S, T], sr *stateRepresentation[S, T]) string {
 	var sb strings.Builder
 	for _, triggers := range sr.TriggerBehaviours {
 		for _, trigger := range triggers {
 			switch t := trigger.(type) {
-			case *ignoredTriggerBehaviour:
+			case *ignoredTriggerBehaviour[T]:
 				sb.WriteString(g.formatOneTransition(sr.State, sr.State, t.Trigger, nil, t.Guard))
-			case *reentryTriggerBehaviour:
+			case *reentryTriggerBehaviour[S, T]:
 				actions := g.getEntryActions(sr.EntryActions, t.Trigger)
 				sb.WriteString(g.formatOneTransition(sr.State, t.Destination, t.Trigger, actions, t.Guard))
-			case *internalTriggerBehaviour:
+			case *internalTriggerBehaviour[S, T]:
 				actions := g.getEntryActions(sr.EntryActions, t.Trigger)
 				sb.WriteString(g.formatOneTransition(sr.State, sr.State, t.Trigger, actions, t.Guard))
-			case *transitioningTriggerBehaviour:
+			case *transitioningTriggerBehaviour[S, T]:
 				var actions []string
 				if dest, ok := sm.stateConfig[t.Destination]; ok {
 					actions = g.getEntryActions(dest.EntryActions, t.Trigger)
 				}
 				sb.WriteString(g.formatOneTransition(sr.State, t.Destination, t.Trigger, actions, t.Guard))
-			case *dynamicTriggerBehaviour:
+			case *dynamicTriggerBehaviour[S, T]:
 				// TODO: not supported yet
 			}
 		}
@@ -116,7 +116,7 @@ func (g *graph) formatAllStateTransitions(sm *StateMachine, sr *stateRepresentat
 	return sb.String()
 }
 
-func (g *graph) formatOneTransition(source, destination State, trigger Trigger, actions []string, guards transitionGuard) string {
+func (g *graph[S, T]) formatOneTransition(source S, destination S, trigger T, actions []string, guards transitionGuard) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprint(trigger))
 	if len(actions) > 0 {
@@ -132,6 +132,6 @@ func (g *graph) formatOneTransition(source, destination State, trigger Trigger, 
 	return g.formatOneLine(fmt.Sprint(source), fmt.Sprint(destination), sb.String())
 }
 
-func (g *graph) formatOneLine(fromNodeName, toNodeName, label string) string {
+func (g *graph[S, T]) formatOneLine(fromNodeName, toNodeName, label string) string {
 	return fmt.Sprintf("\n%s -> %s [style=\"solid\", label=\"%s\"];", fromNodeName, toNodeName, label)
 }
