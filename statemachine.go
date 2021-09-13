@@ -58,6 +58,12 @@ func DefaultUnhandledTriggerAction[S State, T Trigger](_ context.Context, state 
 	return fmt.Errorf("stateless: No valid leaving transitions are permitted from state '%v' for trigger '%v', consider ignoring the trigger", state, trigger)
 }
 
+func callEvents[S State, T Trigger](events []TransitionFunc[S, T], ctx context.Context, transition Transition[S, T]) {
+	for _, e := range events {
+		e(ctx, transition)
+	}
+}
+
 // A StateMachine is an abstract machine that can be in exactly one of a finite number of states at any given time.
 // It is safe to use the StateMachine concurrently, but non of the callbacks (state manipulation, actions, events, ...) are guarded,
 // so it is up to the client to protect them against race conditions.
@@ -67,9 +73,9 @@ type StateMachine[S State, T Trigger] struct {
 	stateAccessor          func(context.Context) (S, error)
 	stateMutator           func(context.Context, S) error
 	unhandledTriggerAction UnhandledTriggerActionFunc[S, T]
-	onTransitioningEvents  onTransitionEvents[S, T]
-	onTransitionedEvents   onTransitionEvents[S, T]
-	eventQueue             *list.List
+	onTransitioningEvents  []TransitionFunc[S, T]
+	onTransitionedEvents   []TransitionFunc[S, T]
+	eventQueue             list.List
 	firingMode             FiringMode
 	ops                    uint64
 	firingMutex            sync.Mutex
@@ -80,7 +86,6 @@ func newStateMachine[S State, T Trigger]() *StateMachine[S, T] {
 		stateConfig:            make(map[S]*stateRepresentation[S, T]),
 		triggerConfig:          make(map[T]triggerWithParameters[T]),
 		unhandledTriggerAction: UnhandledTriggerActionFunc[S, T](DefaultUnhandledTriggerAction[S, T]),
-		eventQueue:             list.New(),
 	}
 }
 
@@ -93,7 +98,9 @@ func NewStateMachine[S State, T Trigger](initialState S) *StateMachine[S, T] {
 func NewStateMachineWithMode[S State, T Trigger](initialState S, firingMode FiringMode) *StateMachine[S, T] {
 	var stateMutex sync.Mutex
 	sm := newStateMachine[S, T]()
-	reference := &stateReference[S]{State: initialState}
+	reference := &struct {
+		State S
+	}{State: initialState}
 	sm.stateAccessor = func(_ context.Context) (S, error) {
 		stateMutex.Lock()
 		defer stateMutex.Unlock()
@@ -321,6 +328,12 @@ func (sm *StateMachine[S, T]) internalFire(ctx context.Context, trigger T, args 
 	}
 }
 
+type queuedTrigger[T Trigger] struct {
+	Context context.Context
+	Trigger T
+	Args    []interface{}
+}
+
 func (sm *StateMachine[S, T]) internalFireQueued(ctx context.Context, trigger T, args ...interface{}) error {
 	sm.firingMutex.Lock()
 	sm.eventQueue.PushBack(queuedTrigger[T]{Context: ctx, Trigger: trigger, Args: args})
@@ -403,7 +416,7 @@ func (sm *StateMachine[S, T]) handleReentryTrigger(ctx context.Context, sr *stat
 			return err
 		}
 	}
-	sm.onTransitioningEvents.Invoke(ctx, transition)
+	callEvents(sm.onTransitioningEvents, ctx, transition)
 	rep, err := sm.enterState(ctx, newSr, transition, args...)
 	if err != nil {
 		return err
@@ -411,7 +424,7 @@ func (sm *StateMachine[S, T]) handleReentryTrigger(ctx context.Context, sr *stat
 	if err := sm.setState(ctx, rep.State); err != nil {
 		return err
 	}
-	sm.onTransitionedEvents.Invoke(ctx, transition)
+	callEvents(sm.onTransitionedEvents, ctx, transition)
 	return nil
 }
 
@@ -419,7 +432,7 @@ func (sm *StateMachine[S, T]) handleTransitioningTrigger(ctx context.Context, sr
 	if err := sr.Exit(ctx, transition, args...); err != nil {
 		return err
 	}
-	sm.onTransitioningEvents.Invoke(ctx, transition)
+	callEvents(sm.onTransitioningEvents, ctx, transition)
 	if err := sm.setState(ctx, transition.Destination); err != nil {
 		return err
 	}
@@ -434,7 +447,7 @@ func (sm *StateMachine[S, T]) handleTransitioningTrigger(ctx context.Context, sr
 			return err
 		}
 	}
-	sm.onTransitionedEvents.Invoke(ctx, Transition[S, T]{transition.Source, rep.State, transition.Trigger, false})
+	callEvents(sm.onTransitionedEvents, ctx, Transition[S, T]{transition.Source, rep.State, transition.Trigger, false})
 	return nil
 }
 
@@ -460,7 +473,7 @@ func (sm *StateMachine[S, T]) enterState(ctx context.Context, sr *stateRepresent
 		}
 		initialTranslation := Transition[S, T]{Source: transition.Source, Destination: sr.InitialTransitionTarget, Trigger: transition.Trigger, isInitial: true}
 		sr = sm.stateRepresentation(sr.InitialTransitionTarget)
-		sm.onTransitioningEvents.Invoke(ctx, Transition[S, T]{transition.Destination, initialTranslation.Destination, transition.Trigger, false})
+		callEvents(sm.onTransitioningEvents, ctx, Transition[S, T]{transition.Destination, initialTranslation.Destination, transition.Trigger, false})
 		sr, err = sm.enterState(ctx, sr, initialTranslation, args...)
 	}
 	return sr, err

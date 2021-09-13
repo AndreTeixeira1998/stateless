@@ -98,7 +98,7 @@ type ignoredTriggerBehaviour[T Trigger] struct {
 	baseTriggerBehaviour[T]
 }
 
-type reentryTriggerBehaviour [S State, T Trigger]struct {
+type reentryTriggerBehaviour[S State, T Trigger] struct {
 	baseTriggerBehaviour[T]
 	Destination S
 }
@@ -152,18 +152,4 @@ func (t triggerWithParameters[T]) validateParameters(args ...interface{}) {
 			panic(fmt.Sprintf("stateless: The argument in position '%d' is of type '%v' but must be of type '%v'.", i, reflect.TypeOf(args[i]), t.ArgumentTypes[i]))
 		}
 	}
-}
-
-type onTransitionEvents[S State, T Trigger] []TransitionFunc[S, T]
-
-func (e onTransitionEvents[S, T]) Invoke(ctx context.Context, transition Transition[S, T]) {
-	for _, event := range e {
-		event(ctx, transition)
-	}
-}
-
-type queuedTrigger[T Trigger] struct {
-	Context context.Context
-	Trigger T
-	Args    []interface{}
 }
